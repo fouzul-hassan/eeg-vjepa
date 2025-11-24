@@ -109,7 +109,15 @@ python -m evals.main \
 ### Citation
 Our EEG adaption, training runs, and evaluations:
 ```bibtex
-Coming soon
+@misc{hojjati2025videoeegadaptingjoint,
+      title={From Video to EEG: Adapting Joint Embedding Predictive Architecture to Uncover Visual Concepts in Brain Signal Analysis}, 
+      author={Amirabbas Hojjati and Lu Li and Ibrahim Hameed and Anis Yazidi and Pedro G. Lind and Rabindra Khadka},
+      year={2025},
+      eprint={2507.03633},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2507.03633}, 
+}
 ```
 
 V-JEPA Paper (for video):
