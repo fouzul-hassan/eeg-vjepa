@@ -29,12 +29,16 @@ class MaskCollator(object):
     ):
         super(MaskCollator, self).__init__()
 
-        # ***
-        # # GLOBAL OVERRIDE
-        crop_size = (19, 500)
-        if isinstance(patch_size, (list, tuple)) and len(patch_size) != 2:
-            patch_size = (4, 30)
-        # ***
+        # Handle crop_size and patch_size as tuples
+        if not isinstance(crop_size, tuple):
+            crop_size = (crop_size, crop_size) if not isinstance(crop_size, list) else tuple(crop_size)
+        
+        if not isinstance(patch_size, tuple):
+            if isinstance(patch_size, list):
+                patch_size = tuple(patch_size)
+            else:
+                patch_size = (patch_size, patch_size)
+
 
         self.mask_generators = []
         for m in cfgs_mask:

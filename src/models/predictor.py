@@ -47,12 +47,17 @@ class VisionTransformerPredictor(nn.Module):
     ):
         super().__init__()
 
-        # ***
-        # # GLOBAL OVERRIDE
-        img_size = (19, 500)
-        if isinstance(patch_size, (list, tuple)) and len(patch_size) != 2:
-            patch_size = (4, 30)
-        # ***
+        # Handle both scalar and tuple img_size
+        if not isinstance(img_size, tuple):
+            img_size = (img_size, img_size)
+        
+        # Handle patch_size as tuple
+        if not isinstance(patch_size, tuple):
+            if isinstance(patch_size, list):
+                patch_size = tuple(patch_size)
+            else:
+                patch_size = (patch_size, patch_size)
+
 
         # Map input to predictor dimension
         self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)

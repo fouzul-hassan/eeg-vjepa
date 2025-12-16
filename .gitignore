@@ -1,2 +1,43 @@
-.*.swp
+# Byte-compiled / optimized / DLL files
 *.pyc
+*.pyo
+__pycache__/
+*.swp
+.*.swp
+
+# ZuCo dataset files (large pickle files - download from HuggingFace)
+src/datasets/ZuCo/downloads/
+src/datasets/ZuCo/preprocessed/
+src/datasets/ZuCo/task1-SR/
+src/datasets/ZuCo/task2-NR/
+src/datasets/ZuCo/task3-TSR/
+*.pickle
+
+# Training outputs
+output/
+*.pth.tar
+*.pt
+
+# Logs
+*.log
+*.csv
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/

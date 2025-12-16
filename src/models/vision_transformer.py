@@ -43,13 +43,17 @@ class VisionTransformer(nn.Module):
     ):
         super().__init__()
 
-        # ***
-        # # GLOBAL OVERRIDE
-        img_size = (19, 500)
-        if isinstance(patch_size, (list, tuple)) and len(patch_size) != 2:
-            patch_size = (4, 30)
-        in_chans = 1
-        # ***
+        # Handle both scalar and tuple img_size
+        if not isinstance(img_size, tuple):
+            img_size = (img_size, img_size)
+        
+        # Handle patch_size as tuple
+        if not isinstance(patch_size, tuple):
+            if isinstance(patch_size, list):
+                patch_size = tuple(patch_size)
+            else:
+                patch_size = (patch_size, patch_size)
+
 
         self.num_features = self.embed_dim = embed_dim
         self.num_heads = num_heads

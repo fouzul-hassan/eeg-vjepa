@@ -90,4 +90,20 @@ def init_data(
             log_dir=log_dir,
             mode=mode)
 
+    elif data.lower() == 'eegdataset':
+        from src.datasets.eeg_dataset import make_eeg_dataset
+        # For EEG, root_path should be the directory containing .pt files
+        data_dir = root_path[0] if isinstance(root_path, list) else root_path
+        dataset, data_loader, dist_sampler = make_eeg_dataset(
+            data_dir=data_dir,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            world_size=world_size,
+            rank=rank,
+            collator=collator,
+            pin_mem=pin_mem,
+            drop_last=drop_last,
+        )
+
     return (data_loader, dist_sampler)
+
