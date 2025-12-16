@@ -186,44 +186,137 @@ class ZuCoSpectrogramDataset(Dataset):
     
     Expected spectrogram shape: (n_channels, n_freq_bins, n_time_bins)
     Output shape for 3D ViT: (1, n_time_bins, n_channels, n_freq_bins)
+    
+    Supports:
+    - Local directory loading
+    - HuggingFace download (zip files)
+    - Train/val/test split (70/15/15)
     """
     
     def __init__(
         self,
-        data_dir: str,
+        data_dir: str = None,
+        hf_repo: str = None,
+        hf_filename: str = None,
+        hf_token: str = None,
+        split: str = 'train',  # 'train', 'val', 'test', or 'all'
+        train_ratio: float = 0.70,
+        val_ratio: float = 0.15,
+        test_ratio: float = 0.15,
+        seed: int = 42,
         transform=None,
         load_to_ram: bool = False
     ):
         """
         Args:
-            data_dir: Directory containing preprocessed .pt files
+            data_dir: Local directory containing preprocessed .pt files
+            hf_repo: HuggingFace repo ID (e.g., 'fouzul-hassan/zuco-preprocessed')
+            hf_filename: Filename of zip on HF (e.g., 'task2-NR.zip')
+            hf_token: HuggingFace token (optional)
+            split: 'train', 'val', 'test', or 'all'
+            train_ratio: Ratio for training (default 0.70 = 70%)
+            val_ratio: Ratio for validation (default 0.15 = 15%)
+            test_ratio: Ratio for testing (default 0.15 = 15%)
+            seed: Random seed for reproducible splits
             transform: Optional transform to apply
             load_to_ram: If True, load all data to RAM for faster access
         """
-        self.data_dir = data_dir
         self.transform = transform
         self.load_to_ram = load_to_ram
+        self.split = split
+        
+        # Determine data directory
+        if data_dir is not None:
+            self.data_dir = data_dir
+        elif hf_repo is not None and hf_filename is not None:
+            self.data_dir = self._download_from_hf(hf_repo, hf_filename, hf_token)
+        else:
+            raise ValueError("Must provide either data_dir or hf_repo+hf_filename")
         
         # Find all .pt files
-        self.pt_files = sorted([
-            os.path.join(data_dir, f) 
-            for f in os.listdir(data_dir) 
+        all_pt_files = sorted([
+            os.path.join(self.data_dir, f) 
+            for f in os.listdir(self.data_dir) 
             if f.endswith('.pt') and f.startswith('sample_')
         ])
         
-        if len(self.pt_files) == 0:
-            raise ValueError(f"No .pt files found in {data_dir}")
+        if len(all_pt_files) == 0:
+            raise ValueError(f"No .pt files found in {self.data_dir}")
         
-        logger.info(f"Found {len(self.pt_files)} samples in {data_dir}")
+        # Apply train/val/test split
+        self.pt_files = self._apply_split(all_pt_files, split, train_ratio, val_ratio, test_ratio, seed)
+        
+        logger.info(f"[{split}] Found {len(self.pt_files)}/{len(all_pt_files)} samples in {self.data_dir}")
         
         # Optionally load all to RAM
         self.data_cache = None
         if load_to_ram:
             logger.info("Loading all data to RAM...")
             self.data_cache = []
-            for pt_file in tqdm(self.pt_files):
+            for pt_file in tqdm(self.pt_files, desc=f"Loading {split} data"):
                 self.data_cache.append(torch.load(pt_file))
             logger.info("Data loaded to RAM")
+    
+    def _download_from_hf(self, repo_id: str, filename: str, token: str = None) -> str:
+        """Download and extract zip file from HuggingFace."""
+        from huggingface_hub import hf_hub_download
+        import zipfile
+        
+        logger.info(f"Downloading {filename} from {repo_id}...")
+        
+        # Download zip file
+        zip_path = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            repo_type="dataset",
+            token=token
+        )
+        
+        # Extract to a local directory
+        extract_dir = os.path.join(
+            os.path.dirname(zip_path),
+            os.path.splitext(os.path.basename(filename))[0]
+        )
+        
+        if not os.path.exists(extract_dir):
+            logger.info(f"Extracting to {extract_dir}...")
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(extract_dir)
+        
+        # Find the directory with .pt files
+        for root, dirs, files in os.walk(extract_dir):
+            if any(f.endswith('.pt') for f in files):
+                return root
+        
+        return extract_dir
+    
+    def _apply_split(self, all_files: list, split: str, train_ratio: float, val_ratio: float, test_ratio: float, seed: int) -> list:
+        """Apply train/val/test split to file list (70/15/15)."""
+        if split == 'all':
+            return all_files
+        
+        # Reproducible shuffle
+        import random
+        rng = random.Random(seed)
+        indices = list(range(len(all_files)))
+        rng.shuffle(indices)
+        
+        # Calculate split boundaries
+        n_total = len(all_files)
+        n_train = int(n_total * train_ratio)
+        n_val = int(n_total * val_ratio)
+        # n_test = remainder
+        
+        if split == 'train':
+            selected_indices = indices[:n_train]
+        elif split == 'val':
+            selected_indices = indices[n_train:n_train + n_val]
+        elif split == 'test':
+            selected_indices = indices[n_train + n_val:]
+        else:
+            raise ValueError(f"Unknown split: {split}. Use 'train', 'val', 'test', or 'all'")
+        
+        return [all_files[i] for i in sorted(selected_indices)]
     
     def __len__(self):
         return len(self.pt_files)
@@ -247,7 +340,14 @@ class ZuCoSpectrogramDataset(Dataset):
 
 
 def make_eeg_dataset(
-    data_dir: str,
+    data_dir: str = None,
+    hf_repo: str = None,
+    hf_filename: str = None,
+    hf_token: str = None,
+    split: str = 'train',
+    train_ratio: float = 0.70,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
     batch_size: int = 16,
     num_workers: int = 4,
     world_size: int = 1,
@@ -260,11 +360,29 @@ def make_eeg_dataset(
     """
     Create EEG spectrogram dataset and dataloader.
     
+    Args:
+        data_dir: Local directory with .pt files
+        hf_repo: HuggingFace repo ID (alternative to data_dir)
+        hf_filename: Zip filename on HF
+        hf_token: HuggingFace token
+        split: 'train', 'val', 'test', or 'all'
+        train_ratio: Training set ratio (default 70%)
+        val_ratio: Validation set ratio (default 15%)
+        test_ratio: Test set ratio (default 15%)
+        ...
+    
     Returns:
         dataset, dataloader, sampler
     """
     dataset = ZuCoSpectrogramDataset(
         data_dir=data_dir,
+        hf_repo=hf_repo,
+        hf_filename=hf_filename,
+        hf_token=hf_token,
+        split=split,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
         load_to_ram=load_to_ram
     )
     
@@ -273,10 +391,13 @@ def make_eeg_dataset(
             dataset,
             num_replicas=world_size,
             rank=rank,
-            shuffle=True
+            shuffle=(split == 'train')
         )
     else:
-        sampler = torch.utils.data.RandomSampler(dataset)
+        if split == 'train':
+            sampler = torch.utils.data.RandomSampler(dataset)
+        else:
+            sampler = torch.utils.data.SequentialSampler(dataset)
     
     dataloader = DataLoader(
         dataset,
@@ -285,13 +406,14 @@ def make_eeg_dataset(
         num_workers=num_workers,
         collate_fn=collator,
         pin_memory=pin_mem,
-        drop_last=drop_last,
+        drop_last=drop_last if split == 'train' else False,
         persistent_workers=num_workers > 0
     )
     
-    logger.info(f"Created EEG dataloader: {len(dataset)} samples, batch_size={batch_size}")
+    logger.info(f"Created EEG dataloader [{split}]: {len(dataset)} samples, batch_size={batch_size}")
     
     return dataset, dataloader, sampler
+
 
 
 if __name__ == "__main__":
