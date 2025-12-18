@@ -126,6 +126,7 @@ def main():
     
     # Model params
     model_name = cfgs_model.get('model_name', 'vit_small')
+    in_chans = cfgs_model.get('in_chans', 1)  # Default 1 for EEG (not 3 like video)
     pred_depth = cfgs_model.get('pred_depth', 6)
     pred_embed_dim = cfgs_model.get('pred_embed_dim', 384)
     uniform_power = cfgs_model.get('uniform_power', True)
@@ -135,6 +136,7 @@ def main():
     
     print(f"\nModel config:")
     print(f"  Model name: {model_name}")
+    print(f"  Input channels: {in_chans}")
     print(f"  Predictor depth: {pred_depth}")
     
     # Initialize model
@@ -153,6 +155,7 @@ def main():
         num_mask_tokens=len(cfgs_mask),
         zero_init_mask_tokens=zero_init_mask_tokens,
         use_sdpa=use_sdpa,
+        in_chans=in_chans,  # Pass input channels
     )
     target_encoder = copy.deepcopy(encoder)
     for p in target_encoder.parameters():

@@ -82,6 +82,7 @@ meta:
 
 model:
   model_name: vit_small
+  in_chans: 1  # EEG spectrograms have 1 channel (not 3 like RGB video)
   pred_depth: 6
   pred_embed_dim: 384
   uniform_power: true
