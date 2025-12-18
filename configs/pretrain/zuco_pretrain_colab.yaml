@@ -1,0 +1,103 @@
+app: vjepa
+nodes: 1
+tasks_per_node: 1
+
+data:
+  dataset_type: EEGDataset
+  datasets:
+    # Path to preprocessed .pt files (after running download_preprocessed_hf.py)
+    # Train split (70% of data)
+    - "/content/drive/MyDrive/2. MSc Files/0. MSc-Research/EEGtoText-Spectro/eeg-vjepa/src/datasets/preprocessed/task1-SR/content/eeg-vjepa/src/datasets/ZuCo/preprocessed/task1-SR/train"
+  # For validation, use: src/datasets/preprocessed/task2-NR/val
+  # For testing, use: src/datasets/preprocessed/task2-NR/test
+
+  batch_size: 16
+  num_clips: 1
+  # EEG spectrogram dimensions (after STFT: time_bins, channels, freq_bins)
+  # With time_window=512, n_fft=64, hop_length=16: 28 time bins, 105 channels, 33 freq bins
+  num_frames: 28      # time_bins (acts as temporal dimension)
+  tubelet_size: 4     # temporal patch size
+  crop_size:
+    - 105             # channels (height)
+    - 33              # freq_bins (width)
+  patch_size:
+    - 7               # patches across channels (105/7 = 15 patches)
+    - 8               # patches across freq (33/8 ≈ 4 patches, with padding)
+  pin_mem: true
+  num_workers: 4
+  filter_short_videos: false
+
+data_aug:
+  auto_augment: false
+  motion_shift: false
+  random_resize_aspect_ratio:
+    - 0.9
+    - 1.1
+  random_resize_scale:
+    - 0.8
+    - 1.0
+  reprob: 0.0
+
+logging:
+  folder: "C:/MSc Files/MSc Project/E2T-w-VJEPA/e2t-cloned-amirhojati/eeg-vjepa/output/zuco_pretrain"
+  write_tag: zuco-jepa
+
+loss:
+  loss_exp: 1.0
+  reg_coeff: 0.0
+
+mask:
+  - aspect_ratio:
+      - 0.75
+      - 1.5
+    num_blocks: 4
+    spatial_scale:
+      - 0.15
+      - 0.25
+    temporal_scale:
+      - 0.5
+      - 1.0
+    max_temporal_keep: 1.0
+    max_keep: null
+  - aspect_ratio:
+      - 0.75
+      - 1.5
+    num_blocks: 2
+    spatial_scale:
+      - 0.5
+      - 0.7
+    temporal_scale:
+      - 0.5
+      - 1.0
+    max_temporal_keep: 1.0
+    max_keep: null
+
+meta:
+  load_checkpoint: false
+  read_checkpoint: null
+  seed: 42
+  eval_freq: 25
+  use_sdpa: true
+  dtype: bfloat16  # Use bfloat16 for A100, float16 for other GPUs
+
+model:
+  model_name: vit_small
+  pred_depth: 6
+  pred_embed_dim: 384
+  uniform_power: true
+  use_mask_tokens: true
+  zero_init_mask_tokens: true
+
+optimization:
+  ipe_scale: 1.0
+  clip_grad: 10.0
+  weight_decay: 0.04
+  final_weight_decay: 0.4
+  epochs: 100
+  warmup: 10
+  start_lr: 0.00001
+  lr: 0.0001
+  final_lr: 1.0e-06
+  ema:
+    - 0.996
+    - 1.0
