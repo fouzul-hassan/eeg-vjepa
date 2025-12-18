@@ -45,12 +45,31 @@ SEED = 42
 def split_data(task_dir: str, task_name: str):
     """Split .pt files into train/val/test folders (70/15/15)."""
     
-    # Find all .pt files
-    pt_files = sorted([f for f in os.listdir(task_dir) if f.endswith('.pt')])
+    # Find all .pt files (recursively, in case they're in subdirectories)
+    pt_files = []
+    pt_dir = task_dir  # Directory where .pt files are located
+    
+    # Check if files are directly in task_dir or in a subdirectory
+    direct_files = [f for f in os.listdir(task_dir) if f.endswith('.pt')]
+    if len(direct_files) > 0:
+        pt_files = sorted(direct_files)
+        pt_dir = task_dir
+    else:
+        # Look in subdirectories (tar might extract with folder structure)
+        for subdir in os.listdir(task_dir):
+            subdir_path = os.path.join(task_dir, subdir)
+            if os.path.isdir(subdir_path):
+                sub_files = [f for f in os.listdir(subdir_path) if f.endswith('.pt')]
+                if len(sub_files) > 0:
+                    pt_files = sorted(sub_files)
+                    pt_dir = subdir_path
+                    break
     
     if len(pt_files) == 0:
         print(f"  No .pt files found in {task_dir}")
         return
+    
+    print(f"  Found .pt files in: {pt_dir}")
     
     # Shuffle with fixed seed
     random.seed(SEED)
@@ -67,7 +86,7 @@ def split_data(task_dir: str, task_name: str):
     val_indices = indices[n_train:n_train + n_val]
     test_indices = indices[n_train + n_val:]
     
-    # Create split directories
+    # Create split directories in task_dir (not pt_dir)
     splits = {
         'train': train_indices,
         'val': val_indices,
@@ -81,7 +100,7 @@ def split_data(task_dir: str, task_name: str):
         os.makedirs(split_dir, exist_ok=True)
         
         for idx in split_indices:
-            src = os.path.join(task_dir, pt_files[idx])
+            src = os.path.join(pt_dir, pt_files[idx])
             dst = os.path.join(split_dir, pt_files[idx])
             shutil.move(src, dst)
         
@@ -90,8 +109,9 @@ def split_data(task_dir: str, task_name: str):
     return len(train_indices), len(val_indices), len(test_indices)
 
 
+
 def download_and_extract(token: str = None, do_split: bool = True):
-    """Download zip files from HuggingFace, extract and optionally split them."""
+    """Download tar files from HuggingFace, extract and optionally split them."""
     
     # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -99,7 +119,7 @@ def download_and_extract(token: str = None, do_split: bool = True):
     
     for file_path in FILES:
         filename = os.path.basename(file_path)
-        task_name = filename.replace('.zip', '')
+        task_name = filename.replace('.tar', '')
         extract_dir = os.path.join(OUTPUT_DIR, task_name)
         
         print(f"[{task_name}]")
@@ -123,7 +143,7 @@ def download_and_extract(token: str = None, do_split: bool = True):
             # Download
             print(f"  Downloading {filename}...")
             try:
-                zip_path = hf_hub_download(
+                tar_path = hf_hub_download(
                     repo_id=REPO_ID,
                     filename=file_path,
                     repo_type=REPO_TYPE,
@@ -135,13 +155,15 @@ def download_and_extract(token: str = None, do_split: bool = True):
                 print(f"  Extracting...")
                 os.makedirs(extract_dir, exist_ok=True)
                 
-                with zipfile.ZipFile(zip_path, 'r') as zf:
-                    file_list = zf.namelist()
-                    print(f"  Extracting {len(file_list)} files...")
-                    zf.extractall(extract_dir)
+                with tarfile.open(tar_path, 'r') as tf:
+                    members = tf.getmembers()
+                    print(f"  Extracting {len(members)} files...")
+                    tf.extractall(extract_dir)
                 
-                # Count .pt files
-                pt_files = [f for f in os.listdir(extract_dir) if f.endswith('.pt')]
+                # Count .pt files (may be in subdirectory after extraction)
+                pt_files = []
+                for root, dirs, files in os.walk(extract_dir):
+                    pt_files.extend([f for f in files if f.endswith('.pt')])
                 print(f"  ✓ Extracted {len(pt_files)} .pt files")
                 
             except Exception as e:
