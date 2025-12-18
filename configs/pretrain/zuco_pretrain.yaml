@@ -5,8 +5,11 @@ tasks_per_node: 1
 data:
   dataset_type: EEGDataset
   datasets:
-    # Path to preprocessed .pt files directory (after running preprocess_zuco.py)
-    - "C:/MSc Files/MSc Project/E2T-w-VJEPA/e2t-cloned-amirhojati/eeg-vjepa/src/datasets/ZuCo/preprocessed/task2-NR"
+    # Path to preprocessed .pt files (after running download_preprocessed_hf.py)
+    # Train split (70% of data)
+    - "C:/MSc Files/MSc Project/E2T-w-VJEPA/e2t-cloned-amirhojati/eeg-vjepa/src/datasets/preprocessed/task2-NR/train"
+  # For validation, use: src/datasets/preprocessed/task2-NR/val
+  # For testing, use: src/datasets/preprocessed/task2-NR/test
 
   batch_size: 16
   num_clips: 1
