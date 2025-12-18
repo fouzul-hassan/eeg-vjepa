@@ -13,7 +13,7 @@ Usage:
 
 import os
 import argparse
-import zipfile
+import tarfile
 import random
 import shutil
 from huggingface_hub import hf_hub_download
@@ -22,11 +22,11 @@ from huggingface_hub import hf_hub_download
 REPO_ID = "fouzulhassan/zuco"
 REPO_TYPE = "dataset"
 
-# Files to download (from preprocessed folder)
+# Files to download (from preprocessed folder) - .tar format
 FILES = [
-    "preprocessed/task1-SR.zip",
-    "preprocessed/task2-NR.zip",
-    "preprocessed/task3-TSR.zip",
+    "preprocessed/task1-SR.tar",
+    "preprocessed/task2-NR.tar",
+    "preprocessed/task3-TSR.tar",
 ]
 
 # Output directory
