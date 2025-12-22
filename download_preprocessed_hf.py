@@ -37,7 +37,7 @@ FILES = [
 # Output directory
 OUTPUT_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "src", "datasets", "preprocessed"
+    "src", "datasets", "preprocessedv2"
 )
 
 # Subject-based splits
@@ -171,20 +171,24 @@ def download_and_extract(token: str = None, do_split: bool = True):
                 )
                 print(f"  Downloaded to cache")
                 
-                # Extract
-                print(f"  Extracting...")
+                # Extract - flatten nested paths, only extract .pt files
+                print(f"  Extracting (flattening nested paths)...")
                 os.makedirs(extract_dir, exist_ok=True)
                 
                 with tarfile.open(tar_path, 'r') as tf:
                     members = tf.getmembers()
-                    print(f"  Extracting {len(members)} files...")
-                    tf.extractall(extract_dir)
+                    pt_members = [m for m in members if m.name.endswith('.pt')]
+                    print(f"  Found {len(pt_members)} .pt files in archive")
+                    
+                    # Extract .pt files directly to extract_dir (flatten paths)
+                    for member in pt_members:
+                        # Get just the filename, ignore the nested path
+                        member.name = os.path.basename(member.name)
+                        tf.extract(member, extract_dir)
                 
-                # Count .pt files (may be in subdirectory after extraction)
-                pt_files = []
-                for root, dirs, files in os.walk(extract_dir):
-                    pt_files.extend([f for f in files if f.endswith('.pt')])
-                print(f"  ✓ Extracted {len(pt_files)} .pt files")
+                # Count extracted .pt files
+                pt_files = [f for f in os.listdir(extract_dir) if f.endswith('.pt')]
+                print(f"  ✓ Extracted {len(pt_files)} .pt files to {extract_dir}")
                 
             except Exception as e:
                 print(f"  ✗ Error: {e}")
