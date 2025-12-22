@@ -1,21 +1,24 @@
 """
-Simple script to split .pt files into train/val/test folders (70/15/15).
-Run this in Colab after extracting the tar files.
+Split .pt files into train/val/test folders based on SUBJECT ID.
+
+Subject-based splitting:
+  - Train: ZAB, ZDM, ZGW, ZJM, ZJN, ZJS, ZKB, ZKH, ZKW (9 subjects)
+  - Val:   ZMG (1 subject)
+  - Test:  ZPH (1 subject)
 
 Usage:
     python split_data.py --data_dir /path/to/folder/with/pt/files
 """
 
 import os
-import random
 import shutil
 import argparse
+from collections import defaultdict
 
-# Split ratios
-TRAIN_RATIO = 0.70
-VAL_RATIO = 0.15
-TEST_RATIO = 0.15
-SEED = 42
+# Subject-based splits
+TRAIN_SUBJECTS = ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH', 'ZKW']
+VAL_SUBJECTS = ['ZMG']
+TEST_SUBJECTS = ['ZPH']
 
 
 def find_pt_files_dir(base_dir):
@@ -36,8 +39,18 @@ def find_pt_files_dir(base_dir):
     return None, []
 
 
+def extract_subject_id(filename):
+    """Extract subject ID from filename (e.g., 'ZAB_task1_sample0.pt' -> 'ZAB')."""
+    # Subject ID is the first part before underscore
+    basename = os.path.splitext(filename)[0]
+    parts = basename.split('_')
+    if parts:
+        return parts[0]
+    return None
+
+
 def split_data(data_dir):
-    """Split .pt files into train/val/test folders (70/15/15)."""
+    """Split .pt files into train/val/test folders based on subject ID."""
     
     print(f"Looking for .pt files in: {data_dir}")
     
@@ -57,43 +70,59 @@ def split_data(data_dir):
         print(f"Already split! train folder has {len(os.listdir(train_dir))} files")
         return True
     
-    # Shuffle with fixed seed
-    random.seed(SEED)
-    indices = list(range(len(pt_files)))
-    random.shuffle(indices)
+    # Group files by subject
+    subject_files = defaultdict(list)
+    unknown_files = []
     
-    # Calculate split sizes
-    n_total = len(pt_files)
-    n_train = int(n_total * TRAIN_RATIO)
-    n_val = int(n_total * VAL_RATIO)
+    for f in pt_files:
+        subject_id = extract_subject_id(f)
+        if subject_id:
+            subject_files[subject_id].append(f)
+        else:
+            unknown_files.append(f)
     
-    # Split indices
-    train_indices = indices[:n_train]
-    val_indices = indices[n_train:n_train + n_val]
-    test_indices = indices[n_train + n_val:]
+    print(f"\nFound {len(subject_files)} unique subjects: {sorted(subject_files.keys())}")
+    for subj in sorted(subject_files.keys()):
+        print(f"  {subj}: {len(subject_files[subj])} files")
     
+    if unknown_files:
+        print(f"\nWARNING: {len(unknown_files)} files with unknown subject ID")
+    
+    # Split by subject
     splits = {
-        'train': train_indices,
-        'val': val_indices,
-        'test': test_indices
+        'train': [],
+        'val': [],
+        'test': []
     }
     
-    print(f"\nSplitting {n_total} files:")
-    print(f"  train: {len(train_indices)} ({TRAIN_RATIO*100:.0f}%)")
-    print(f"  val:   {len(val_indices)} ({VAL_RATIO*100:.0f}%)")
-    print(f"  test:  {len(test_indices)} ({TEST_RATIO*100:.0f}%)")
+    for subject_id, files in subject_files.items():
+        if subject_id in TRAIN_SUBJECTS:
+            splits['train'].extend(files)
+        elif subject_id in VAL_SUBJECTS:
+            splits['val'].extend(files)
+        elif subject_id in TEST_SUBJECTS:
+            splits['test'].extend(files)
+        else:
+            print(f"WARNING: Subject {subject_id} not in any split, adding to train")
+            splits['train'].extend(files)
+    
+    n_total = len(pt_files)
+    print(f"\nSplitting {n_total} files by subject:")
+    print(f"  train: {len(splits['train'])} files ({len(TRAIN_SUBJECTS)} subjects: {TRAIN_SUBJECTS})")
+    print(f"  val:   {len(splits['val'])} files ({len(VAL_SUBJECTS)} subjects: {VAL_SUBJECTS})")
+    print(f"  test:  {len(splits['test'])} files ({len(TEST_SUBJECTS)} subjects: {TEST_SUBJECTS})")
     
     # Create split directories and move files
-    for split_name, split_indices in splits.items():
+    for split_name, split_files in splits.items():
         split_dir = os.path.join(data_dir, split_name)
         os.makedirs(split_dir, exist_ok=True)
         
-        for idx in split_indices:
-            src = os.path.join(pt_dir, pt_files[idx])
-            dst = os.path.join(split_dir, pt_files[idx])
+        for filename in split_files:
+            src = os.path.join(pt_dir, filename)
+            dst = os.path.join(split_dir, filename)
             shutil.move(src, dst)
         
-        print(f"  Moved {len(split_indices)} files to {split_name}/")
+        print(f"  Moved {len(split_files)} files to {split_name}/")
     
     print("\n✓ Split complete!")
     print(f"  Train: {os.path.join(data_dir, 'train')}")
@@ -104,14 +133,18 @@ def split_data(data_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Split .pt files into train/val/test")
+    parser = argparse.ArgumentParser(description="Split .pt files into train/val/test by subject")
     parser.add_argument('--data_dir', type=str, required=True, 
                         help='Directory containing .pt files (or parent directory)')
     args = parser.parse_args()
     
-    print("=" * 50)
-    print("Split Data into Train/Val/Test (70/15/15)")
-    print("=" * 50)
+    print("=" * 60)
+    print("Split Data into Train/Val/Test (Subject-Based)")
+    print("=" * 60)
+    print(f"Train subjects: {TRAIN_SUBJECTS}")
+    print(f"Val subjects:   {VAL_SUBJECTS}")
+    print(f"Test subjects:  {TEST_SUBJECTS}")
+    print("=" * 60)
     
     split_data(args.data_dir)
 
