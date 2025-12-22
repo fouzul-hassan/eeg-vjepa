@@ -238,7 +238,7 @@ def main():
     print("Download & Split Preprocessed ZuCo Data from HuggingFace")
     print("=" * 60)
     print(f"Repo: {REPO_ID}")
-    print(f"Split: {int(TRAIN_RATIO*100)}/{int(VAL_RATIO*100)}/{int(TEST_RATIO*100)} (train/val/test)")
+    print(f"Split: Subject-based (Train: {len(TRAIN_SUBJECTS)}, Val: {len(VAL_SUBJECTS)}, Test: {len(TEST_SUBJECTS)} subjects)")
     print()
     
     download_and_extract(token=args.token, do_split=not args.no_split)
