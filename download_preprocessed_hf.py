@@ -3,6 +3,11 @@ Download preprocessed ZuCo .pt files from HuggingFace, extract and split them.
 
 Downloads from: https://huggingface.co/datasets/fouzulhassan/zuco/tree/main/preprocessed
 
+Subject-based splitting:
+  - Train: ZAB, ZDM, ZGW, ZJM, ZJN, ZJS, ZKB, ZKH, ZKW (9 subjects)
+  - Val:   ZMG (1 subject)
+  - Test:  ZPH (1 subject)
+
 Usage:
     conda activate zuco-hdf5
     python download_preprocessed_hf.py
@@ -14,8 +19,8 @@ Usage:
 import os
 import argparse
 import tarfile
-import random
 import shutil
+from collections import defaultdict
 from huggingface_hub import hf_hub_download
 
 # Configuration
@@ -35,15 +40,23 @@ OUTPUT_DIR = os.path.join(
     "src", "datasets", "preprocessed"
 )
 
-# Split ratios
-TRAIN_RATIO = 0.70
-VAL_RATIO = 0.15
-TEST_RATIO = 0.15
-SEED = 42
+# Subject-based splits
+TRAIN_SUBJECTS = ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH', 'ZKW']
+VAL_SUBJECTS = ['ZMG']
+TEST_SUBJECTS = ['ZPH']
+
+
+def extract_subject_id(filename):
+    """Extract subject ID from filename (e.g., 'ZAB_task1_sample0.pt' -> 'ZAB')."""
+    basename = os.path.splitext(filename)[0]
+    parts = basename.split('_')
+    if parts:
+        return parts[0]
+    return None
 
 
 def split_data(task_dir: str, task_name: str):
-    """Split .pt files into train/val/test folders (70/15/15)."""
+    """Split .pt files into train/val/test folders based on subject ID."""
     
     # Find all .pt files (recursively, in case they're in subdirectories)
     pt_files = []
@@ -71,42 +84,49 @@ def split_data(task_dir: str, task_name: str):
     
     print(f"  Found .pt files in: {pt_dir}")
     
-    # Shuffle with fixed seed
-    random.seed(SEED)
-    indices = list(range(len(pt_files)))
-    random.shuffle(indices)
+    # Group files by subject
+    subject_files = defaultdict(list)
+    for f in pt_files:
+        subject_id = extract_subject_id(f)
+        if subject_id:
+            subject_files[subject_id].append(f)
     
-    # Calculate split sizes
-    n_total = len(pt_files)
-    n_train = int(n_total * TRAIN_RATIO)
-    n_val = int(n_total * VAL_RATIO)
+    print(f"  Found {len(subject_files)} unique subjects")
     
-    # Split indices
-    train_indices = indices[:n_train]
-    val_indices = indices[n_train:n_train + n_val]
-    test_indices = indices[n_train + n_val:]
-    
-    # Create split directories in task_dir (not pt_dir)
+    # Split by subject
     splits = {
-        'train': train_indices,
-        'val': val_indices,
-        'test': test_indices
+        'train': [],
+        'val': [],
+        'test': []
     }
     
-    print(f"  Splitting {n_total} files: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)}")
+    for subject_id, files in subject_files.items():
+        if subject_id in TRAIN_SUBJECTS:
+            splits['train'].extend(files)
+        elif subject_id in VAL_SUBJECTS:
+            splits['val'].extend(files)
+        elif subject_id in TEST_SUBJECTS:
+            splits['test'].extend(files)
+        else:
+            print(f"  WARNING: Subject {subject_id} not in any split, adding to train")
+            splits['train'].extend(files)
     
-    for split_name, split_indices in splits.items():
+    n_total = len(pt_files)
+    print(f"  Splitting {n_total} files by subject: train={len(splits['train'])}, val={len(splits['val'])}, test={len(splits['test'])}")
+    
+    # Create split directories and move files
+    for split_name, split_files in splits.items():
         split_dir = os.path.join(task_dir, split_name)
         os.makedirs(split_dir, exist_ok=True)
         
-        for idx in split_indices:
-            src = os.path.join(pt_dir, pt_files[idx])
-            dst = os.path.join(split_dir, pt_files[idx])
+        for filename in split_files:
+            src = os.path.join(pt_dir, filename)
+            dst = os.path.join(split_dir, filename)
             shutil.move(src, dst)
         
-        print(f"    {split_name}: {len(split_indices)} files")
+        print(f"    {split_name}: {len(split_files)} files")
     
-    return len(train_indices), len(val_indices), len(test_indices)
+    return len(splits['train']), len(splits['val']), len(splits['test'])
 
 
 
@@ -170,9 +190,9 @@ def download_and_extract(token: str = None, do_split: bool = True):
                 print(f"  ✗ Error: {e}")
                 continue
         
-        # Split into train/val/test
+        # Split into train/val/test by subject
         if do_split:
-            print(f"  Splitting (70/15/15)...")
+            print(f"  Splitting by subject...")
             split_data(extract_dir, task_name)
     
     print(f"\n{'='*60}")
