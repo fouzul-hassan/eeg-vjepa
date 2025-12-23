@@ -189,6 +189,7 @@ class ZuCoSpectrogramDataset(Dataset):
        - Each file contains: {'spectrogram': tensor(C, F, T), ...}
     2. Subject format: Per-subject files (ZAB.pt, ZMG.pt, ...)
        - Each file contains: {'spectrograms': tensor(N, 1, T, C, F), 'metadata': [...]}
+       - Uses LAZY LOADING to avoid memory issues with large files
     
     Output shape for 3D ViT: (1, T, C, F)
     """
@@ -205,7 +206,8 @@ class ZuCoSpectrogramDataset(Dataset):
         test_ratio: float = 0.15,
         seed: int = 42,
         transform=None,
-        load_to_ram: bool = False
+        load_to_ram: bool = False,
+        cache_size: int = 2  # Number of subject files to keep in cache
     ):
         """
         Args:
@@ -219,12 +221,14 @@ class ZuCoSpectrogramDataset(Dataset):
             test_ratio: Ratio for testing (default 0.15 = 15%)
             seed: Random seed for reproducible splits
             transform: Optional transform to apply
-            load_to_ram: If True, load all data to RAM for faster access
+            load_to_ram: If True, load all data to RAM (only for sample format)
+            cache_size: Number of subject files to cache (for subject format)
         """
         self.transform = transform
         self.load_to_ram = load_to_ram
         self.split = split
         self.format = None  # Will be 'sample' or 'subject'
+        self.cache_size = cache_size
         
         # Determine data directory
         if data_dir is not None:
@@ -251,46 +255,82 @@ class ZuCoSpectrogramDataset(Dataset):
             # Old sample-based format
             self.format = 'sample'
             self.pt_files = self._apply_split(sample_files, split, train_ratio, val_ratio, test_ratio, seed)
-            self.spectrograms = None
-            self.metadata = None
             logger.info(f"[{split}] Found {len(self.pt_files)} sample files in {self.data_dir}")
             
+            # Optionally load all to RAM
+            self.data_cache = None
+            if load_to_ram:
+                logger.info("Loading all data to RAM...")
+                self.data_cache = []
+                for pt_file in tqdm(self.pt_files, desc=f"Loading {split} data"):
+                    self.data_cache.append(torch.load(pt_file))
+                logger.info("Data loaded to RAM")
+            
         elif len(subject_files) > 0:
-            # New subject-based format - load and concatenate all
+            # New subject-based format - LAZY LOADING
             self.format = 'subject'
-            self.pt_files = None
+            self.subject_files = subject_files
             
-            all_spectrograms = []
-            all_metadata = []
+            # Build index: scan files to get sample counts WITHOUT loading full data
+            # This creates a mapping: global_idx -> (file_idx, local_idx)
+            self.file_info = []  # List of (filepath, num_samples, start_idx)
+            self.total_samples = 0
             
+            logger.info(f"Scanning {len(subject_files)} subject files...")
             for pt_file in subject_files:
+                # Quick scan: load just metadata, not full tensor
+                # For very large files, we can use torch.load with map_location
                 data = torch.load(pt_file, weights_only=False)
                 if 'spectrograms' in data:
-                    all_spectrograms.append(data['spectrograms'])
-                    # Add subject info to metadata if available
-                    subject = data.get('subject', os.path.basename(pt_file).replace('.pt', ''))
-                    for m in data.get('metadata', [{}] * len(data['spectrograms'])):
-                        m_copy = m.copy() if isinstance(m, dict) else {}
-                        m_copy['subject'] = subject
-                        all_metadata.append(m_copy)
+                    num_samples = data['spectrograms'].shape[0]
+                    self.file_info.append({
+                        'path': pt_file,
+                        'num_samples': num_samples,
+                        'start_idx': self.total_samples,
+                        'subject': data.get('subject', os.path.basename(pt_file).replace('.pt', ''))
+                    })
+                    self.total_samples += num_samples
+                del data  # Free memory immediately
             
-            if len(all_spectrograms) > 0:
-                self.spectrograms = torch.cat(all_spectrograms, dim=0)
-                self.metadata = all_metadata
-                logger.info(f"[{split}] Loaded {len(self.spectrograms)} samples from {len(subject_files)} subject files")
-            else:
-                raise ValueError(f"No valid spectrograms found in subject files in {self.data_dir}")
+            logger.info(f"[{split}] Found {self.total_samples} samples across {len(self.file_info)} subject files (LAZY LOADING)")
+            
+            # LRU cache for loaded files
+            self._file_cache = {}
+            self._cache_order = []
+            
         else:
             raise ValueError(f"No .pt files found in {self.data_dir}")
+    
+    def _get_file_data(self, file_idx: int):
+        """Load file data with LRU caching."""
+        if file_idx in self._file_cache:
+            # Move to end of cache order (most recently used)
+            self._cache_order.remove(file_idx)
+            self._cache_order.append(file_idx)
+            return self._file_cache[file_idx]
         
-        # Optionally load all to RAM (only for sample format)
-        self.data_cache = None
-        if load_to_ram and self.format == 'sample':
-            logger.info("Loading all data to RAM...")
-            self.data_cache = []
-            for pt_file in tqdm(self.pt_files, desc=f"Loading {split} data"):
-                self.data_cache.append(torch.load(pt_file))
-            logger.info("Data loaded to RAM")
+        # Load the file
+        file_info = self.file_info[file_idx]
+        data = torch.load(file_info['path'], weights_only=False)
+        
+        # Add to cache
+        self._file_cache[file_idx] = data
+        self._cache_order.append(file_idx)
+        
+        # Evict oldest if cache is full
+        while len(self._cache_order) > self.cache_size:
+            oldest = self._cache_order.pop(0)
+            del self._file_cache[oldest]
+        
+        return data
+    
+    def _global_to_local(self, global_idx: int):
+        """Convert global sample index to (file_idx, local_idx)."""
+        for file_idx, info in enumerate(self.file_info):
+            if global_idx < info['start_idx'] + info['num_samples']:
+                local_idx = global_idx - info['start_idx']
+                return file_idx, local_idx
+        raise IndexError(f"Index {global_idx} out of range")
     
     def _download_from_hf(self, repo_id: str, filename: str, token: str = None) -> str:
         """Download and extract zip file from HuggingFace."""
@@ -355,14 +395,16 @@ class ZuCoSpectrogramDataset(Dataset):
     
     def __len__(self):
         if self.format == 'subject':
-            return len(self.spectrograms)
+            return self.total_samples
         else:
             return len(self.pt_files)
     
     def __getitem__(self, idx):
         if self.format == 'subject':
-            # Subject format: spectrograms already in correct shape (1, T, C, F)
-            spectrogram = self.spectrograms[idx]
+            # Subject format with lazy loading
+            file_idx, local_idx = self._global_to_local(idx)
+            data = self._get_file_data(file_idx)
+            spectrogram = data['spectrograms'][local_idx]  # Already (1, T, C, F)
         else:
             # Sample format: load from file
             if self.data_cache is not None:
