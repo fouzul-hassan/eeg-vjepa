@@ -7,7 +7,9 @@ data:
   datasets:
     # Path to preprocessed .pt files (after running download_preprocessed_hf.py)
     # Train split (70% of data)
-    - "C:/MSc Files/MSc Project/E2T-w-VJEPA/e2t-cloned-amirhojati/eeg-vjepa/src/datasets/preprocessed/task2-NR/train"
+    - "C:\MSc Files\MSc Project\E2T-w-VJEPA\e2t-cloned-amirhojati\eeg-vjepa\src\datasets\preprocessed_vjepa_subjects\task1-SR\train"
+    - "C:\MSc Files\MSc Project\E2T-w-VJEPA\e2t-cloned-amirhojati\eeg-vjepa\src\datasets\preprocessed_vjepa_subjects\task2-NR\train"
+    - "C:\MSc Files\MSc Project\E2T-w-VJEPA\e2t-cloned-amirhojati\eeg-vjepa\src\datasets\preprocessed_vjepa_subjects\task3-TSR\train"
   # For validation, use: src/datasets/preprocessed/task2-NR/val
   # For testing, use: src/datasets/preprocessed/task2-NR/test
 
@@ -94,7 +96,7 @@ optimization:
   clip_grad: 10.0
   weight_decay: 0.04
   final_weight_decay: 0.4
-  epochs: 100
+  epochs: 1
   warmup: 10
   start_lr: 0.00001
   lr: 0.0001

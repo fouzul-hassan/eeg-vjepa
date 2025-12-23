@@ -184,13 +184,13 @@ class ZuCoSpectrogramDataset(Dataset):
     """
     Dataset for loading preprocessed ZuCo EEG spectrograms from .pt files.
     
-    Expected spectrogram shape: (n_channels, n_freq_bins, n_time_bins)
-    Output shape for 3D ViT: (1, n_time_bins, n_channels, n_freq_bins)
+    Supports TWO formats:
+    1. Old format: Individual sample files (sample_000000.pt, sample_000001.pt, ...)
+       - Each file contains: {'spectrogram': tensor(C, F, T), ...}
+    2. Subject format: Per-subject files (ZAB.pt, ZMG.pt, ...)
+       - Each file contains: {'spectrograms': tensor(N, 1, T, C, F), 'metadata': [...]}
     
-    Supports:
-    - Local directory loading
-    - HuggingFace download (zip files)
-    - Train/val/test split (70/15/15)
+    Output shape for 3D ViT: (1, T, C, F)
     """
     
     def __init__(
@@ -224,6 +224,7 @@ class ZuCoSpectrogramDataset(Dataset):
         self.transform = transform
         self.load_to_ram = load_to_ram
         self.split = split
+        self.format = None  # Will be 'sample' or 'subject'
         
         # Determine data directory
         if data_dir is not None:
@@ -233,24 +234,58 @@ class ZuCoSpectrogramDataset(Dataset):
         else:
             raise ValueError("Must provide either data_dir or hf_repo+hf_filename")
         
-        # Find all .pt files
+        # Detect format and find .pt files
         all_pt_files = sorted([
             os.path.join(self.data_dir, f) 
             for f in os.listdir(self.data_dir) 
-            if f.endswith('.pt') and f.startswith('sample_')
+            if f.endswith('.pt')
         ])
         
-        if len(all_pt_files) == 0:
+        # Check for sample-based format (sample_*.pt)
+        sample_files = [f for f in all_pt_files if os.path.basename(f).startswith('sample_')]
+        
+        # Check for subject-based format (e.g., ZAB.pt, ZMG.pt)
+        subject_files = [f for f in all_pt_files if not os.path.basename(f).startswith('sample_')]
+        
+        if len(sample_files) > 0:
+            # Old sample-based format
+            self.format = 'sample'
+            self.pt_files = self._apply_split(sample_files, split, train_ratio, val_ratio, test_ratio, seed)
+            self.spectrograms = None
+            self.metadata = None
+            logger.info(f"[{split}] Found {len(self.pt_files)} sample files in {self.data_dir}")
+            
+        elif len(subject_files) > 0:
+            # New subject-based format - load and concatenate all
+            self.format = 'subject'
+            self.pt_files = None
+            
+            all_spectrograms = []
+            all_metadata = []
+            
+            for pt_file in subject_files:
+                data = torch.load(pt_file, weights_only=False)
+                if 'spectrograms' in data:
+                    all_spectrograms.append(data['spectrograms'])
+                    # Add subject info to metadata if available
+                    subject = data.get('subject', os.path.basename(pt_file).replace('.pt', ''))
+                    for m in data.get('metadata', [{}] * len(data['spectrograms'])):
+                        m_copy = m.copy() if isinstance(m, dict) else {}
+                        m_copy['subject'] = subject
+                        all_metadata.append(m_copy)
+            
+            if len(all_spectrograms) > 0:
+                self.spectrograms = torch.cat(all_spectrograms, dim=0)
+                self.metadata = all_metadata
+                logger.info(f"[{split}] Loaded {len(self.spectrograms)} samples from {len(subject_files)} subject files")
+            else:
+                raise ValueError(f"No valid spectrograms found in subject files in {self.data_dir}")
+        else:
             raise ValueError(f"No .pt files found in {self.data_dir}")
         
-        # Apply train/val/test split
-        self.pt_files = self._apply_split(all_pt_files, split, train_ratio, val_ratio, test_ratio, seed)
-        
-        logger.info(f"[{split}] Found {len(self.pt_files)}/{len(all_pt_files)} samples in {self.data_dir}")
-        
-        # Optionally load all to RAM
+        # Optionally load all to RAM (only for sample format)
         self.data_cache = None
-        if load_to_ram:
+        if load_to_ram and self.format == 'sample':
             logger.info("Loading all data to RAM...")
             self.data_cache = []
             for pt_file in tqdm(self.pt_files, desc=f"Loading {split} data"):
@@ -319,19 +354,26 @@ class ZuCoSpectrogramDataset(Dataset):
         return [all_files[i] for i in sorted(selected_indices)]
     
     def __len__(self):
-        return len(self.pt_files)
+        if self.format == 'subject':
+            return len(self.spectrograms)
+        else:
+            return len(self.pt_files)
     
     def __getitem__(self, idx):
-        if self.data_cache is not None:
-            data = self.data_cache[idx]
+        if self.format == 'subject':
+            # Subject format: spectrograms already in correct shape (1, T, C, F)
+            spectrogram = self.spectrograms[idx]
         else:
-            data = torch.load(self.pt_files[idx])
-        
-        spectrogram = data['spectrogram']  # (channels, freq_bins, time_bins)
-        
-        # Reshape for 3D ViT: (1, time_bins, channels, freq_bins)
-        # This treats: in_channels=1, T=time_bins, H=channels, W=freq_bins
-        spectrogram = spectrogram.permute(2, 0, 1).unsqueeze(0)  # (1, T, C, F)
+            # Sample format: load from file
+            if self.data_cache is not None:
+                data = self.data_cache[idx]
+            else:
+                data = torch.load(self.pt_files[idx])
+            
+            spectrogram = data['spectrogram']  # (channels, freq_bins, time_bins)
+            
+            # Reshape for 3D ViT: (1, time_bins, channels, freq_bins)
+            spectrogram = spectrogram.permute(2, 0, 1).unsqueeze(0)  # (1, T, C, F)
         
         if self.transform is not None:
             spectrogram = self.transform(spectrogram)
@@ -340,7 +382,7 @@ class ZuCoSpectrogramDataset(Dataset):
 
 
 def make_eeg_dataset(
-    data_dir: str = None,
+    data_dir = None,  # Can be str or list of str
     hf_repo: str = None,
     hf_filename: str = None,
     hf_token: str = None,
@@ -361,7 +403,7 @@ def make_eeg_dataset(
     Create EEG spectrogram dataset and dataloader.
     
     Args:
-        data_dir: Local directory with .pt files
+        data_dir: Local directory (str) or list of directories with .pt files
         hf_repo: HuggingFace repo ID (alternative to data_dir)
         hf_filename: Zip filename on HF
         hf_token: HuggingFace token
@@ -374,17 +416,45 @@ def make_eeg_dataset(
     Returns:
         dataset, dataloader, sampler
     """
-    dataset = ZuCoSpectrogramDataset(
-        data_dir=data_dir,
-        hf_repo=hf_repo,
-        hf_filename=hf_filename,
-        hf_token=hf_token,
-        split=split,
-        train_ratio=train_ratio,
-        val_ratio=val_ratio,
-        test_ratio=test_ratio,
-        load_to_ram=load_to_ram
-    )
+    from torch.utils.data import ConcatDataset
+    
+    # Handle multiple directories
+    if isinstance(data_dir, list):
+        datasets = []
+        for d in data_dir:
+            try:
+                ds = ZuCoSpectrogramDataset(
+                    data_dir=d,
+                    split=split,
+                    train_ratio=train_ratio,
+                    val_ratio=val_ratio,
+                    test_ratio=test_ratio,
+                    load_to_ram=load_to_ram
+                )
+                datasets.append(ds)
+                logger.info(f"Loaded {len(ds)} samples from {d}")
+            except Exception as e:
+                logger.warning(f"Could not load from {d}: {e}")
+        
+        if len(datasets) == 0:
+            raise ValueError(f"No valid datasets found in {data_dir}")
+        elif len(datasets) == 1:
+            dataset = datasets[0]
+        else:
+            dataset = ConcatDataset(datasets)
+            logger.info(f"Total combined: {len(dataset)} samples from {len(datasets)} directories")
+    else:
+        dataset = ZuCoSpectrogramDataset(
+            data_dir=data_dir,
+            hf_repo=hf_repo,
+            hf_filename=hf_filename,
+            hf_token=hf_token,
+            split=split,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            load_to_ram=load_to_ram
+        )
     
     if world_size > 1:
         sampler = DistributedSampler(

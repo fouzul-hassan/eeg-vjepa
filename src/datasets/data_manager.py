@@ -92,8 +92,9 @@ def init_data(
 
     elif data.lower() == 'eegdataset':
         from src.datasets.eeg_dataset import make_eeg_dataset
-        # For EEG, root_path should be the directory containing .pt files
-        data_dir = root_path[0] if isinstance(root_path, list) else root_path
+        # For EEG, root_path can be a single directory or list of directories
+        # Pass the list directly to enable multi-task loading
+        data_dir = root_path if isinstance(root_path, list) else root_path
         dataset, data_loader, dist_sampler = make_eeg_dataset(
             data_dir=data_dir,
             batch_size=batch_size,
