@@ -235,9 +235,9 @@ class ZuCoSpectrogramDataset(Dataset):
         
         # Find all .pt files
         all_pt_files = sorted([
-            os.path.join(self.data_dir, f) 
-            for f in os.listdir(self.data_dir) 
-            if f.endswith('.pt') and f.startswith('sample_')
+            os.path.join(self.data_dir, f)
+            for f in os.listdir(self.data_dir)
+            if f.endswith('.pt')
         ])
         
         if len(all_pt_files) == 0:
