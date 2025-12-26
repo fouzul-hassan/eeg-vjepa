@@ -534,7 +534,7 @@ def main():
                 _new_lr = scheduler.step()
                 _new_wd = wd_scheduler.step()
                 
-                with torch.cuda.amp.autocast(dtype=dtype, enabled=mixed_precision):
+                with torch.amp.autocast('cuda', dtype=dtype, enabled=mixed_precision):
                     # Target forward
                     with torch.no_grad():
                         h = target_encoder(clips)
@@ -586,10 +586,10 @@ def main():
                     for param_q, param_k in zip(encoder.parameters(), target_encoder.parameters()):
                         param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
                 
-                return float(loss), float(loss_jepa), float(loss_reg), _new_lr, grad_stats, grad_stats_pred
+                return float(loss.detach()), float(loss_jepa.detach()), float(loss_reg.detach()), _new_lr, _new_wd, grad_stats, grad_stats_pred
             
             # Execute with GPU timing
-            (loss, loss_jepa, loss_reg, current_lr, grad_stats, grad_stats_pred), gpu_time_ms = gpu_timer(train_step)
+            (loss, loss_jepa, loss_reg, current_lr, current_wd, grad_stats, grad_stats_pred), gpu_time_ms = gpu_timer(train_step)
             wall_time_ms = (time.time() - itr_start_time) * 1000.
             
             # Input variance
@@ -627,7 +627,7 @@ def main():
                     f'p{jepa_loss_meter.avg:.3f} r{reg_loss_meter.avg:.3f} | '
                     f'input_var: {input_var_meter.avg:.3f} {input_var_min_meter.avg:.3f} | '
                     f'masks: [{", ".join([f"{m.avg:.1f}" for m in mask_meters])}] '
-                    f'[wd: {scheduler.wd:.2e}] [lr: {current_lr:.2e}] '
+                    f'[wd: {current_wd:.2e}] [lr: {current_lr:.2e}] '
                     f'[mem: {torch.cuda.max_memory_allocated()/1024**2:.2e}] '
                     f'[gpu: {gpu_time_meter.avg:.1f}ms] [wall: {wall_time_meter.avg:.1f}ms]'
                 )
